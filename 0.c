@@ -8,7 +8,7 @@
 #include <gtk/gtk.h>
 //==============================================================================
 GtkApplication *Z_gtk_Q_app;
-GtkWidget *Z_gtk_Q_main_window = 0;
+GtkWidget *Z_gtk_Q_main_window;
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 static pid_t process_id;
 static int shm_id;
@@ -35,12 +35,29 @@ Z_signal_V_process_call_req( int uid
           case 2:
             {   GtkBuilder *builder = gtk_builder_new_from_string( p, ~0 );
                 p += strlen(p) + 1;
-                GtkWidget *window = GTK_WIDGET( gtk_builder_get_object( builder, "main-window" ));
-                g_object_unref(builder);
+                GtkWidget *window = 0;
+                GSList *objects = gtk_builder_get_objects(builder);
+                GSList *next = objects;
+                do
+                {   if( GTK_IS_WINDOW( next->data ))
+                    {   window = GTK_WIDGET( next->data );
+                        break;
+                    }
+                    next = next->next;
+                }while(next);
                 gtk_window_set_application( GTK_WINDOW(window), Z_gtk_Q_app );
                 gtk_window_close( GTK_WINDOW( Z_gtk_Q_main_window ));
-                Z_gtk_Q_main_window = window;
-                gtk_window_present( GTK_WINDOW( Z_gtk_Q_main_window ));
+                gtk_window_present( GTK_WINDOW(window) );
+                next = next->next;
+                while(next)
+                {   if( GTK_IS_WINDOW( next->data ))
+                    {   window = GTK_WIDGET( next->data );
+                        gtk_window_present( GTK_WINDOW(window) );
+                    }
+                    next = next->next;
+                }
+                g_slist_free(objects);
+                g_object_unref(builder);
                 break;
             }
           default:
