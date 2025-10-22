@@ -12,7 +12,53 @@ GtkWidget *Z_gtk_Q_main_window;
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 static pid_t process_id;
 static int shm_id;
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+static unsigned Z_entry_X_changed_I_timeout_S;
 //==============================================================================
+static
+void
+Z_action_X_activate( GSimpleAction *action
+, GVariant *parameter
+, void *data
+){  fprintf( stderr, "\nAction" );
+}
+static
+void
+Z_button_X_clicked( GtkButton *button
+, void *data
+){  fprintf( stderr, "\nButton" );
+}
+static
+void
+Z_checkbutton_X_toggled( GtkCheckButton *checkbutton
+, void *data
+){  fprintf( stderr, "\nCheckButton" );
+}
+static
+void
+Z_dropdown_X_selected( GtkDropDown *dropdown
+, GParamSpec *parameter
+, void *data
+){  fprintf( stderr, "\nDropDown" );
+}
+static
+gboolean
+Z_entry_X_changed_I_timeout( void *data
+){  GtkEntry *entry = data;
+    GtkEntryBuffer *buffer = gtk_entry_get_buffer(entry);
+    fprintf( stderr, "\nEntry=%s,%s", gtk_buildable_get_buildable_id(data), gtk_entry_buffer_get_text(buffer) );
+    Z_entry_X_changed_I_timeout_S = 0;
+    return G_SOURCE_REMOVE;
+}
+static
+void
+Z_entry_X_changed( GtkEntry *entry
+, void *data
+){  if( Z_entry_X_changed_I_timeout_S )
+        g_source_remove( Z_entry_X_changed_I_timeout_S );
+    Z_entry_X_changed_I_timeout_S = g_timeout_add( 183, Z_entry_X_changed_I_timeout, entry );
+}
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 static
 void
 Z_signal_V_process_call_req( int uid
@@ -56,6 +102,29 @@ Z_signal_V_process_call_req( int uid
                     }
                     next = next->next;
                 }
+                next = objects;
+                do
+                {   if( GTK_IS_BUTTON( next->data ))
+                        g_signal_connect( next->data, "clicked", G_CALLBACK( Z_button_X_clicked ), 0 );
+                    else if( GTK_IS_CHECK_BUTTON( next->data ))
+                        g_signal_connect( next->data, "toggled", G_CALLBACK( Z_checkbutton_X_toggled ), 0 );
+                    else if( GTK_IS_DROP_DOWN( next->data ))
+                        g_signal_connect( next->data, "notify::selected-item", G_CALLBACK( Z_dropdown_X_selected ), 0 );
+                    else if( GTK_IS_ENTRY( next->data ))
+                        g_signal_connect( next->data, "changed", G_CALLBACK( Z_entry_X_changed ), 0 );
+                    else if( GTK_IS_MENU_BUTTON( next->data ))
+                    {   GMenuModel *menu = gtk_menu_button_get_menu_model( GTK_MENU_BUTTON( next->data ));
+                        for( int i = 0; i != g_menu_model_get_n_items(menu); i++ )
+                        {   char *s;
+                            g_menu_model_get_item_attribute( menu, i, "action", "s", &s );
+                            GSimpleAction *action = g_simple_action_new( s + 4, 0 );
+                            g_free(s);
+                            g_signal_connect( action, "activate", G_CALLBACK( Z_action_X_activate ), 0 );
+                            g_action_map_add_action( G_ACTION_MAP( Z_gtk_Q_app ), G_ACTION(action) );
+                        }
+                    }
+                    next = next->next;
+                }while(next);
                 g_slist_free(objects);
                 g_object_unref(builder);
                 break;
@@ -97,12 +166,12 @@ Q_application_X_activate_I_1( void *data
 }
 static
 void
-Q_application_X_activate( GtkApplication *Z_gtk_Q_app
+Q_application_X_activate( GtkApplication *app
 , void *data
-){  Z_gtk_Q_main_window = gtk_application_window_new( Z_gtk_Q_app );
+){  Z_gtk_Q_main_window = gtk_application_window_new(app);
     g_idle_add( &Q_application_X_activate_I_1, 0 );
 }
-//==============================================================================
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 int
 main(
   int argc
