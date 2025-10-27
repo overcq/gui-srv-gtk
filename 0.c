@@ -2,6 +2,7 @@
 * ©overcq                on ‟Gentoo Linux 23.0” “x86_64”              2025‒9‒8 T
 *******************************************************************************/
 #include <sys/shm.h>
+#include <sched.h>
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
@@ -11,42 +12,102 @@ GtkApplication *Z_gtk_Q_app;
 GtkWidget *Z_gtk_Q_main_window;
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 static pid_t process_id;
-static int shm_id;
+static volatile int shm_id = ~0;
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 static unsigned Z_entry_X_changed_I_timeout_S;
+static GHashTable *Z_widget_S_by_id;
 //==============================================================================
+static
+void
+Z_signal_I_process_call_req_Z_void(
+  char *id
+){  size_t l_1 = strlen(id) + 1;
+    size_t l = 0x1000 - 1;
+    l = ( l_1 + l ) & ~l;
+    shm_id = shmget( IPC_PRIVATE, l, 0600 | IPC_CREAT | IPC_EXCL );
+    char *p = shmat( shm_id, 0, 0 );
+    *( uint64_t * )p = 2;
+    strcpy( p + sizeof( uint64_t ), id );
+    p[ sizeof( uint64_t ) + l_1 - 1 ] = '\0';
+    shmdt(p);
+    union sigval sv;
+    sv.sival_int = shm_id;
+    sigqueue( process_id, SIGUSR1, sv );
+}
+static
+void
+Z_signal_I_process_call_req_Z_unsigned(
+  char *id
+, unsigned data
+){  size_t l_1 = strlen(id) + 1;
+    size_t l = 0x1000 - 1;
+    l = ( l_1 + sizeof(unsigned) + l ) & ~l;
+    shm_id = shmget( IPC_PRIVATE, l, 0600 | IPC_CREAT | IPC_EXCL );
+    char *p = shmat( shm_id, 0, 0 );
+    *( uint64_t * )p = 2;
+    strcpy( p + sizeof( uint64_t ), id );
+    p[ sizeof( uint64_t ) + l_1 - 1 ] = '\0';
+    *( unsigned * )( p + sizeof( uint64_t ) + l_1 ) = data;
+    *( uint64_t * )( p + sizeof( uint64_t ) + l_1 + sizeof(unsigned) ) = 0;
+    shmdt(p);
+    union sigval sv;
+    sv.sival_int = shm_id;
+    sigqueue( process_id, SIGUSR1, sv );
+}
+static
+void
+Z_signal_I_process_call_req_Z_string(
+  char *id
+, char *data
+){  size_t l_1 = strlen(id) + 1;
+    size_t l_2 = data ? strlen(data) + 1 : 0;
+    size_t l = 0x1000 - 1;
+    l = ( l_1 + l_2 + l ) & ~l;
+    shm_id = shmget( IPC_PRIVATE, l, 0600 | IPC_CREAT | IPC_EXCL );
+    char *p = shmat( shm_id, 0, 0 );
+    *( uint64_t * )p = 2;
+    strcpy( p + sizeof( uint64_t ), id );
+    p[ sizeof( uint64_t ) + l_1 - 1 ] = '\0';
+    strcpy( p + sizeof( uint64_t ) + l_1, data );
+    p[ sizeof( uint64_t ) + l_1 + l_2 ] = '\0';
+    *( uint64_t * )( p + sizeof( uint64_t ) + l_1 + l_2 - 1 ) = 0;
+    shmdt(p);
+    union sigval sv;
+    sv.sival_int = shm_id;
+    sigqueue( process_id, SIGUSR1, sv );
+}
 static
 void
 Z_action_X_activate( GSimpleAction *action
 , GVariant *parameter
 , void *data
-){  fprintf( stderr, "\nAction" );
+){  Z_signal_I_process_call_req_Z_void( gtk_buildable_get_buildable_id(( void *)action ));
 }
 static
 void
 Z_button_X_clicked( GtkButton *button
 , void *data
-){  fprintf( stderr, "\nButton" );
+){  Z_signal_I_process_call_req_Z_void( gtk_buildable_get_buildable_id(( void *)button ));
 }
 static
 void
 Z_checkbutton_X_toggled( GtkCheckButton *checkbutton
 , void *data
-){  fprintf( stderr, "\nCheckButton" );
+){  Z_signal_I_process_call_req_Z_void( gtk_buildable_get_buildable_id(( void *)checkbutton ));
 }
 static
 void
 Z_dropdown_X_selected( GtkDropDown *dropdown
 , GParamSpec *parameter
 , void *data
-){  fprintf( stderr, "\nDropDown" );
+){  Z_signal_I_process_call_req_Z_unsigned( gtk_buildable_get_buildable_id(( void *)dropdown ), gtk_drop_down_get_selected(dropdown) );
 }
 static
 gboolean
 Z_entry_X_changed_I_timeout( void *data
 ){  GtkEntry *entry = data;
     GtkEntryBuffer *buffer = gtk_entry_get_buffer(entry);
-    fprintf( stderr, "\nEntry=%s,%s", gtk_buildable_get_buildable_id(data), gtk_entry_buffer_get_text(buffer) );
+    Z_signal_I_process_call_req_Z_string( gtk_buildable_get_buildable_id(data), gtk_entry_buffer_get_text(buffer) );
     Z_entry_X_changed_I_timeout_S = 0;
     return G_SOURCE_REMOVE;
 }
@@ -102,14 +163,20 @@ Z_signal_V_process_call_req( int uid
                     }
                     next = next->next;
                 }
+                Z_widget_S_by_id = g_hash_table_new( g_str_hash, g_str_equal );
                 next = objects;
                 do
-                {   if( GTK_IS_BUTTON( next->data ))
+                {   if( GTK_IS_ENTRY( next->data )
+                    || GTK_IS_PROGRESS_BAR( next->data )
+                    || GTK_IS_SPINNER( next->data )
+                    )
+                        g_hash_table_insert( Z_widget_S_by_id, gtk_buildable_get_buildable_id( next->data ), next->data );
+                    if( GTK_IS_BUTTON( next->data ))
                         g_signal_connect( next->data, "clicked", G_CALLBACK( Z_button_X_clicked ), 0 );
                     else if( GTK_IS_CHECK_BUTTON( next->data ))
                         g_signal_connect( next->data, "toggled", G_CALLBACK( Z_checkbutton_X_toggled ), 0 );
                     else if( GTK_IS_DROP_DOWN( next->data ))
-                        g_signal_connect( next->data, "notify::selected-item", G_CALLBACK( Z_dropdown_X_selected ), 0 );
+                        g_signal_connect( next->data, "notify::selected", G_CALLBACK( Z_dropdown_X_selected ), 0 );
                     else if( GTK_IS_ENTRY( next->data ))
                         g_signal_connect( next->data, "changed", G_CALLBACK( Z_entry_X_changed ), 0 );
                     else if( GTK_IS_MENU_BUTTON( next->data ))
@@ -127,6 +194,25 @@ Z_signal_V_process_call_req( int uid
                 }while(next);
                 g_slist_free(objects);
                 g_object_unref(builder);
+                break;
+            }
+          case 3:
+            {   char *key = p;
+                p += strlen(p) + 1;
+                GtkWidget *widget = g_hash_table_lookup( Z_widget_S_by_id, key );
+                if( GTK_IS_ENTRY(widget) )
+                {   GtkEntry *entry = GTK_ENTRY(widget);
+                    GtkEntryBuffer *buffer = gtk_entry_get_buffer(entry);
+                    gtk_entry_buffer_set_text( buffer, p, -1 );
+                    p += strlen(p) + 1;
+                }else if( GTK_IS_PROGRESS_BAR(widget) )
+                {   GtkProgressBar *progress_bar = GTK_PROGRESS_BAR(widget);
+                    gtk_progress_bar_set_fraction( progress_bar, *( double * )p );
+                    p += sizeof(double);
+                }else if( GTK_IS_SPINNER(widget) )
+                {   GtkSpinner *spinner = GTK_SPINNER(widget);
+                    gtk_spinner_set_spinning( spinner, !gtk_spinner_get_spinning(spinner) );
+                }
                 break;
             }
           default:
@@ -147,6 +233,7 @@ Z_signal_V_process_call_reply( int uid
 , siginfo_t *siginfo
 , void *data
 ){  shmctl( shm_id, IPC_RMID, 0 );
+    shm_id = ~0;
 }
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 static
