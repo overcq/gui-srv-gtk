@@ -2,8 +2,8 @@
 * ©overcq                on ‟Gentoo Linux 23.0” “x86_64”              2025‒9‒8 T
 *******************************************************************************/
 #include <sys/shm.h>
-#include <sched.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <gtk/gtk.h>
@@ -13,68 +13,93 @@ GtkWidget *Z_gtk_Q_main_window;
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 static pid_t process_id;
 static volatile int shm_id = ~0;
+static char *next_commands;
+static size_t next_commands_l;
+static unsigned Z_signal_I_timeout_S;
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 static unsigned Z_entry_X_changed_I_timeout_S;
 static GHashTable *Z_widget_S_by_id;
 //==============================================================================
+static
+gboolean
+Z_signal_I_timeout( void *data
+){  if( ~shm_id )
+        return G_SOURCE_CONTINUE;
+    shm_id = shmget( IPC_PRIVATE, next_commands_l, 0600 | IPC_CREAT | IPC_EXCL );
+    if( !~shm_id )
+        exit( EXIT_FAILURE );
+    char *p = shmat( shm_id, 0, 0 );
+    memcpy( p, next_commands, next_commands_l );
+    shmdt(p);
+    free( next_commands );
+    next_commands = 0;
+    union sigval sv;
+    sv.sival_int = shm_id;
+    sigqueue( process_id, SIGUSR1, sv );
+    Z_signal_I_timeout_S = 0;
+    return G_SOURCE_REMOVE;
+}
 static
 void
 Z_signal_I_process_call_req_Z_void(
   char *id
 ){  size_t l_1 = strlen(id) + 1;
     size_t l = 0x1000 - 1;
-    l = ( l_1 + l ) & ~l;
-    shm_id = shmget( IPC_PRIVATE, l, 0600 | IPC_CREAT | IPC_EXCL );
-    char *p = shmat( shm_id, 0, 0 );
+    l = ( sizeof( uint64_t ) + l_1 + sizeof( uint64_t ) + l ) & ~l;
+    char *p = realloc( next_commands, next_commands_l + l );
+    if( !p )
+        exit( EXIT_FAILURE );
+    next_commands = p;
+    p += next_commands_l;
+    next_commands_l += l;
     *( uint64_t * )p = 2;
     strcpy( p + sizeof( uint64_t ), id );
-    p[ sizeof( uint64_t ) + l_1 - 1 ] = '\0';
-    shmdt(p);
-    union sigval sv;
-    sv.sival_int = shm_id;
-    sigqueue( process_id, SIGUSR1, sv );
+    *( uint64_t * )( p + sizeof( uint64_t ) + l_1 ) = 0;
+    if( !Z_signal_I_timeout_S )
+        g_idle_add( Z_signal_I_timeout, 0 );
 }
 static
 void
 Z_signal_I_process_call_req_Z_unsigned(
   char *id
-, unsigned data
+, unsigned v
 ){  size_t l_1 = strlen(id) + 1;
     size_t l = 0x1000 - 1;
-    l = ( l_1 + sizeof(unsigned) + l ) & ~l;
-    shm_id = shmget( IPC_PRIVATE, l, 0600 | IPC_CREAT | IPC_EXCL );
-    char *p = shmat( shm_id, 0, 0 );
+    l = ( sizeof( uint64_t ) + l_1 + sizeof(unsigned) + sizeof( uint64_t ) + l ) & ~l;
+    char *p = realloc( next_commands, next_commands_l + l );
+    if( !p )
+        exit( EXIT_FAILURE );
+    next_commands = p;
+    p += next_commands_l;
+    next_commands_l += l;
     *( uint64_t * )p = 2;
     strcpy( p + sizeof( uint64_t ), id );
-    p[ sizeof( uint64_t ) + l_1 - 1 ] = '\0';
-    *( unsigned * )( p + sizeof( uint64_t ) + l_1 ) = data;
+    *( unsigned * )( p + sizeof( uint64_t ) + l_1 ) = v;
     *( uint64_t * )( p + sizeof( uint64_t ) + l_1 + sizeof(unsigned) ) = 0;
-    shmdt(p);
-    union sigval sv;
-    sv.sival_int = shm_id;
-    sigqueue( process_id, SIGUSR1, sv );
+    if( !Z_signal_I_timeout_S )
+        g_idle_add( Z_signal_I_timeout, 0 );
 }
 static
 void
 Z_signal_I_process_call_req_Z_string(
   char *id
-, char *data
+, char *s
 ){  size_t l_1 = strlen(id) + 1;
-    size_t l_2 = data ? strlen(data) + 1 : 0;
+    size_t l_2 = strlen(s) + 1;
     size_t l = 0x1000 - 1;
-    l = ( l_1 + l_2 + l ) & ~l;
-    shm_id = shmget( IPC_PRIVATE, l, 0600 | IPC_CREAT | IPC_EXCL );
-    char *p = shmat( shm_id, 0, 0 );
+    l = ( sizeof( uint64_t ) + l_1 + l_2 + sizeof( uint64_t ) + l ) & ~l;
+    char *p = realloc( next_commands, next_commands_l + l );
+    if( !p )
+        exit( EXIT_FAILURE );
+    next_commands = p;
+    p += next_commands_l;
+    next_commands_l += l;
     *( uint64_t * )p = 2;
     strcpy( p + sizeof( uint64_t ), id );
-    p[ sizeof( uint64_t ) + l_1 - 1 ] = '\0';
-    strcpy( p + sizeof( uint64_t ) + l_1, data );
-    p[ sizeof( uint64_t ) + l_1 + l_2 ] = '\0';
-    *( uint64_t * )( p + sizeof( uint64_t ) + l_1 + l_2 - 1 ) = 0;
-    shmdt(p);
-    union sigval sv;
-    sv.sival_int = shm_id;
-    sigqueue( process_id, SIGUSR1, sv );
+    strcpy( p + sizeof( uint64_t ) + l_1, s );
+    *( uint64_t * )( p + sizeof( uint64_t ) + l_1 + l_2 ) = 0;
+    if( !Z_signal_I_timeout_S )
+        g_idle_add( Z_signal_I_timeout, 0 );
 }
 static
 void
@@ -137,10 +162,26 @@ Z_signal_V_process_call_req( int uid
         bool invalid = false;
         switch(command)
         { case 1:
-                gtk_window_close( GTK_WINDOW( Z_gtk_Q_main_window ));
+            {   GList *windows_ = gtk_application_get_windows( Z_gtk_Q_app );
+                GSList *windows = 0;
+                while( windows_ )
+                {   windows = g_slist_append( windows, windows_->data );
+                    windows_ = windows_->next;
+                }
+                GSList *next = windows;
+                do
+                {   gtk_window_close( GTK_WINDOW( next->data ));
+                    next = next->next;
+                }while(next);
+                g_slist_free(windows);
                 break;
+            }
           case 2:
-            {   GtkBuilder *builder = gtk_builder_new_from_string( p, ~0 );
+            {   if( Z_widget_S_by_id )
+                {   invalid = true;
+                    break;
+                }
+                GtkBuilder *builder = gtk_builder_new_from_string( p, ~0 );
                 p += strlen(p) + 1;
                 GtkWidget *window = 0;
                 GSList *objects = gtk_builder_get_objects(builder);
@@ -159,6 +200,7 @@ Z_signal_V_process_call_req( int uid
                 while(next)
                 {   if( GTK_IS_WINDOW( next->data ))
                     {   window = GTK_WIDGET( next->data );
+                        gtk_window_set_application( GTK_WINDOW(window), Z_gtk_Q_app );
                         gtk_window_present( GTK_WINDOW(window) );
                     }
                     next = next->next;
@@ -212,6 +254,7 @@ Z_signal_V_process_call_req( int uid
                 }else if( GTK_IS_SPINNER(widget) )
                 {   GtkSpinner *spinner = GTK_SPINNER(widget);
                     gtk_spinner_set_spinning( spinner, !gtk_spinner_get_spinning(spinner) );
+                    p += sizeof(double);
                 }
                 break;
             }
