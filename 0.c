@@ -3,6 +3,7 @@
 *******************************************************************************/
 #include <sys/shm.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -11,33 +12,36 @@
 GtkApplication *Z_gtk_Q_app;
 GtkWidget *Z_gtk_Q_main_window;
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+static sigset_t sigset_req;
 static pid_t process_id;
 static volatile int shm_id = ~0;
 static char *next_commands;
 static size_t next_commands_l;
-static unsigned Z_signal_I_timeout_S;
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-static unsigned Z_entry_X_changed_I_timeout_S;
 static GHashTable *Z_widget_S_by_id;
 //==============================================================================
 static
 gboolean
 Z_signal_I_timeout( void *data
-){  if( ~shm_id )
+){  if( ~shm_id
+    || !next_commands_l
+    )
         return G_SOURCE_CONTINUE;
+    sigprocmask( SIG_BLOCK, 0, &sigset_req );
     shm_id = shmget( IPC_PRIVATE, next_commands_l, 0600 | IPC_CREAT | IPC_EXCL );
     if( !~shm_id )
         exit( EXIT_FAILURE );
-    char *p = shmat( shm_id, 0, 0 );
+    void *p = shmat( shm_id, 0, 0 );
     memcpy( p, next_commands, next_commands_l );
+    next_commands_l = 0;
     shmdt(p);
     free( next_commands );
     next_commands = 0;
+    sigprocmask( SIG_UNBLOCK, 0, &sigset_req );
     union sigval sv;
     sv.sival_int = shm_id;
     sigqueue( process_id, SIGUSR1, sv );
-    Z_signal_I_timeout_S = 0;
-    return G_SOURCE_REMOVE;
+    return G_SOURCE_CONTINUE;
 }
 static
 void
@@ -45,18 +49,16 @@ Z_signal_I_process_call_req_Z_void(
   char *id
 ){  size_t l_1 = strlen(id) + 1;
     size_t l = 0x1000 - 1;
-    l = ( sizeof( uint64_t ) + l_1 + sizeof( uint64_t ) + l ) & ~l;
-    char *p = realloc( next_commands, next_commands_l + l );
+    l = ( next_commands_l + sizeof( uint64_t ) + l_1 + sizeof( uint64_t ) + l ) & ~l;
+    char *p = realloc( next_commands, l );
     if( !p )
         exit( EXIT_FAILURE );
     next_commands = p;
     p += next_commands_l;
-    next_commands_l += l;
+    next_commands_l = l;
     *( uint64_t * )p = 2;
     strcpy( p + sizeof( uint64_t ), id );
     *( uint64_t * )( p + sizeof( uint64_t ) + l_1 ) = 0;
-    if( !Z_signal_I_timeout_S )
-        g_idle_add( Z_signal_I_timeout, 0 );
 }
 static
 void
@@ -65,41 +67,38 @@ Z_signal_I_process_call_req_Z_unsigned(
 , unsigned v
 ){  size_t l_1 = strlen(id) + 1;
     size_t l = 0x1000 - 1;
-    l = ( sizeof( uint64_t ) + l_1 + sizeof(unsigned) + sizeof( uint64_t ) + l ) & ~l;
-    char *p = realloc( next_commands, next_commands_l + l );
+    l = ( next_commands_l + sizeof( uint64_t ) + l_1 + sizeof(unsigned) + sizeof( uint64_t ) + l ) & ~l;
+    char *p = realloc( next_commands, l );
     if( !p )
         exit( EXIT_FAILURE );
     next_commands = p;
     p += next_commands_l;
-    next_commands_l += l;
+    next_commands_l = l;
     *( uint64_t * )p = 2;
     strcpy( p + sizeof( uint64_t ), id );
     *( unsigned * )( p + sizeof( uint64_t ) + l_1 ) = v;
     *( uint64_t * )( p + sizeof( uint64_t ) + l_1 + sizeof(unsigned) ) = 0;
-    if( !Z_signal_I_timeout_S )
-        g_idle_add( Z_signal_I_timeout, 0 );
 }
 static
 void
 Z_signal_I_process_call_req_Z_string(
   char *id
 , char *s
-){  size_t l_1 = strlen(id) + 1;
+){  fprintf( stderr, "\nid=%s,s=%s", id, s );
+    size_t l_1 = strlen(id) + 1;
     size_t l_2 = strlen(s) + 1;
     size_t l = 0x1000 - 1;
-    l = ( sizeof( uint64_t ) + l_1 + l_2 + sizeof( uint64_t ) + l ) & ~l;
-    char *p = realloc( next_commands, next_commands_l + l );
+    l = ( next_commands_l + sizeof( uint64_t ) + l_1 + l_2 + sizeof( uint64_t ) + l ) & ~l;
+    char *p = realloc( next_commands, l );
     if( !p )
         exit( EXIT_FAILURE );
     next_commands = p;
     p += next_commands_l;
-    next_commands_l += l;
+    next_commands_l = l;
     *( uint64_t * )p = 2;
     strcpy( p + sizeof( uint64_t ), id );
     strcpy( p + sizeof( uint64_t ) + l_1, s );
     *( uint64_t * )( p + sizeof( uint64_t ) + l_1 + l_2 ) = 0;
-    if( !Z_signal_I_timeout_S )
-        g_idle_add( Z_signal_I_timeout, 0 );
 }
 static
 void
@@ -128,21 +127,10 @@ Z_dropdown_X_selected( GtkDropDown *dropdown
 ){  Z_signal_I_process_call_req_Z_unsigned( gtk_buildable_get_buildable_id(( void *)dropdown ), gtk_drop_down_get_selected(dropdown) );
 }
 static
-gboolean
-Z_entry_X_changed_I_timeout( void *data
-){  GtkEntry *entry = data;
-    GtkEntryBuffer *buffer = gtk_entry_get_buffer(entry);
-    Z_signal_I_process_call_req_Z_string( gtk_buildable_get_buildable_id(data), gtk_entry_buffer_get_text(buffer) );
-    Z_entry_X_changed_I_timeout_S = 0;
-    return G_SOURCE_REMOVE;
-}
-static
 void
 Z_entry_X_changed( GtkEntry *entry
-, void *data
-){  if( Z_entry_X_changed_I_timeout_S )
-        g_source_remove( Z_entry_X_changed_I_timeout_S );
-    Z_entry_X_changed_I_timeout_S = g_timeout_add( 183, Z_entry_X_changed_I_timeout, entry );
+){  GtkEntryBuffer *buffer = gtk_entry_get_buffer(entry);
+    Z_signal_I_process_call_req_Z_string( gtk_buildable_get_buildable_id(( void * )entry ), gtk_entry_buffer_get_text(buffer) );
 }
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 static
@@ -239,9 +227,9 @@ Z_signal_V_process_call_req( int uid
                 break;
             }
           case 3:
-            {   char *key = p;
+            {   char *id = p;
                 p += strlen(p) + 1;
-                GtkWidget *widget = g_hash_table_lookup( Z_widget_S_by_id, key );
+                GtkWidget *widget = g_hash_table_lookup( Z_widget_S_by_id, id );
                 if( GTK_IS_ENTRY(widget) )
                 {   GtkEntry *entry = GTK_ENTRY(widget);
                     GtkEntryBuffer *buffer = gtk_entry_get_buffer(entry);
@@ -316,6 +304,9 @@ main(
     sa.sa_flags = 0;
     sa.sa_handler = SIG_IGN;
     sigaction( SIGVTALRM, &sa, 0 );
+    sigemptyset( &sigset_req );
+    sigaddset( &sigset_req, SIGUSR1 );
+    g_timeout_add( 183, &Z_signal_I_timeout, 0 );
     process_id = getppid();
     Z_gtk_Q_app = gtk_application_new( "org.gtk.gui-srv", G_APPLICATION_DEFAULT_FLAGS );
     g_signal_connect( Z_gtk_Q_app, "activate", G_CALLBACK( Q_application_X_activate ), 0 );
