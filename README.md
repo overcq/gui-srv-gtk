@@ -1,4 +1,4 @@
-# gui-srv-qtk
+# gui-srv-gtk
 
 GUI server for universal UI using GTK widgets
 
