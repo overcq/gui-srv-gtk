@@ -23,8 +23,8 @@ static GHashTable *Z_widget_S_by_id;
 static
 gboolean
 Z_signal_I_timeout( void *data
-){  if( ~shm_id
-    || !next_commands_l
+){  if( ~shm_id // Jeszcze nie było odpowiedzi od klienta po poprzednim wysłaniu komend.
+    || !next_commands_l // Nie ma komend do wysłania.
     )
         return G_SOURCE_CONTINUE;
     sigprocmask( SIG_BLOCK, 0, &sigset_req );
@@ -84,8 +84,7 @@ void
 Z_signal_I_process_call_req_Z_string(
   char *id
 , char *s
-){  fprintf( stderr, "\nid=%s,s=%s", id, s );
-    size_t l_1 = strlen(id) + 1;
+){  size_t l_1 = strlen(id) + 1;
     size_t l_2 = strlen(s) + 1;
     size_t l = 0x1000 - 1;
     l = ( next_commands_l + sizeof( uint64_t ) + l_1 + l_2 + sizeof( uint64_t ) + l ) & ~l;
@@ -134,6 +133,30 @@ Z_entry_X_changed( GtkEntry *entry
 }
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 static
+gboolean
+Z_signal_V_process_call_req_I_present( void *data
+){  GSList *next = data;
+    do
+    {   if( GTK_IS_WINDOW( next->data ))
+            gtk_window_present( GTK_WINDOW( next->data ));
+        next = next->next;
+    }while(next);
+    g_slist_free(data);
+    size_t l = 0x1000 - 1;
+    l = ( 2 * sizeof( uint64_t ) + l ) & ~l;
+    shm_id = shmget( IPC_PRIVATE, l, 0600 | IPC_CREAT | IPC_EXCL );
+    if( !~shm_id )
+        exit( EXIT_FAILURE );
+    uint64_t *n = shmat( shm_id, 0, 0 );
+    n[0] = 1;
+    n[1] = 0;
+    shmdt(n);
+    union sigval sv;
+    sv.sival_int = shm_id;
+    sigqueue( process_id, SIGUSR1, sv );
+    return G_SOURCE_REMOVE;
+}
+static
 void
 Z_signal_V_process_call_req( int uid
 , siginfo_t *siginfo
@@ -149,7 +172,7 @@ Z_signal_V_process_call_req( int uid
     {   p += sizeof( uint64_t );
         bool invalid = false;
         switch(command)
-        { case 1:
+        { case 1: // quit
             {   GList *windows_ = gtk_application_get_windows( Z_gtk_Q_app );
                 GSList *windows = 0;
                 while( windows_ )
@@ -164,7 +187,7 @@ Z_signal_V_process_call_req( int uid
                 g_slist_free(windows);
                 break;
             }
-          case 2:
+          case 2: // load
             {   if( Z_widget_S_by_id )
                 {   invalid = true;
                     break;
@@ -173,26 +196,14 @@ Z_signal_V_process_call_req( int uid
                 p += strlen(p) + 1;
                 GtkWidget *window = 0;
                 GSList *objects = gtk_builder_get_objects(builder);
+                g_object_unref(builder);
                 GSList *next = objects;
                 do
                 {   if( GTK_IS_WINDOW( next->data ))
-                    {   window = GTK_WIDGET( next->data );
-                        break;
-                    }
+                        gtk_window_set_application( GTK_WINDOW( next->data ), Z_gtk_Q_app );
                     next = next->next;
                 }while(next);
-                gtk_window_set_application( GTK_WINDOW(window), Z_gtk_Q_app );
                 gtk_window_close( GTK_WINDOW( Z_gtk_Q_main_window ));
-                gtk_window_present( GTK_WINDOW(window) );
-                next = next->next;
-                while(next)
-                {   if( GTK_IS_WINDOW( next->data ))
-                    {   window = GTK_WIDGET( next->data );
-                        gtk_window_set_application( GTK_WINDOW(window), Z_gtk_Q_app );
-                        gtk_window_present( GTK_WINDOW(window) );
-                    }
-                    next = next->next;
-                }
                 Z_widget_S_by_id = g_hash_table_new( g_str_hash, g_str_equal );
                 next = objects;
                 do
@@ -222,11 +233,10 @@ Z_signal_V_process_call_req( int uid
                     }
                     next = next->next;
                 }while(next);
-                g_slist_free(objects);
-                g_object_unref(builder);
+                g_idle_add( &Z_signal_V_process_call_req_I_present, objects );
                 break;
             }
-          case 3:
+          case 3: // set
             {   char *id = p;
                 p += strlen(p) + 1;
                 GtkWidget *widget = g_hash_table_lookup( Z_widget_S_by_id, id );
@@ -273,6 +283,8 @@ Q_application_X_activate_I_1( void *data
 ){  size_t l = 0x1000 - 1;
     l = ( 2 * sizeof( uint64_t ) + l ) & ~l;
     shm_id = shmget( IPC_PRIVATE, l, 0600 | IPC_CREAT | IPC_EXCL );
+    if( !~shm_id )
+        exit( EXIT_FAILURE );
     uint64_t *n = shmat( shm_id, 0, 0 );
     n[0] = 1;
     n[1] = 0;

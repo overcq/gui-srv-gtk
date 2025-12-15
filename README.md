@@ -10,4 +10,4 @@ The program will use the latest version of the GTK libraries available on your U
 
 ## GTK source code
 
-The GTK sources can be downloaded from the repositories located at https://gitlab.gnome.org/GNOME/gtk .
+The GTK sources can be downloaded from the repository located at https://gitlab.gnome.org/GNOME/gtk .
